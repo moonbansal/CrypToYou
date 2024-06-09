@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>CrypToYou</title>
+</head>
+<body>
+    <h1>Receive Money</h1>
+    <p id="message">You have received a payment link. Do you want to add the money to your Stellar wallet?</p>
+    <button onclick="handleReceive()">Yes</button>
+    <button onclick="cancel()">No</button>
+
+    <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        const recipientPublicKey = urlParams.get('recipient');
+        const amount = urlParams.get('amount');
+        const asset = urlParams.get('asset') || 'native';
+        const memo = urlParams.get('memo') || '';
+
+        async function handleReceive() {
+            const hasWallet = await checkWalletExists(recipientPublicKey);
+            if (!hasWallet) {
+                const newWallet = generateNewWallet();
+                await fundNewWallet(newWallet.publicKey, 'YourFundingAccountSecret');
+                recipientPublicKey = newWallet.publicKey;
+                // Store new wallet secret securely if needed
+            }
+            await addAmountToWallet(recipientPublicKey, amount, asset, memo);
+            document.getElementById('message').innerText = 'Funds added to your wallet successfully!';
+        }
+
+        function cancel() {
+            window.location.href = '<https://yourwebsite.com>';
+        }
+
+        async function checkWalletExists(publicKey) {
+            const server = new StellarSdk.Server('<https://horizon.stellar.org>');
+            try {
+                await server.loadAccount(publicKey);
+                return true; // Wallet exists
+            } catch (e) {
+                if (e instanceof StellarSdk.NotFoundError) {
+                    return false; // Wallet does not exist
+                } else {
+                    throw e; // Other errors
+                }
+            }
+        }
+
+        function generateNewWallet() {
+            const pair = StellarSdk.Keypair.random();
+            return {
+                publicKey: pair.publicKey(),
+                secret: pair.secret(),
+            };
+        }
+
+        async function fundNewWallet(newPublicKey, fundingSecret) {
+            const server = new StellarSdk.Server('<https://horizon.stellar.org>');
+            const fundingAccount = await server.loadAccount(fundingSecret);
+            const transaction = new StellarSdk.TransactionBuilder(fundingAccount, {
+                fee: StellarSdk.BASE_FEE,
+                networkPassphrase: StellarSdk.Networks.PUBLIC
+            })
+                .addOperation(StellarSdk.Operation.createAccount({
+                    destination: newPublicKey,
+                    startingBalance: '1' // Minimum balance to activate the account
+                }))
+                .setTimeout(30)
+                .build();
+
+            transaction.sign(StellarSdk.Keypair.fromSecret(fundingSecret));
+            await server.submitTransaction(transaction);
+        }
+
+        async function addAmountToWallet(publicKey, amount, asset, memo) {
+            const server = new StellarSdk.Server('<https://horizon.stellar.org>');
+            const sourceKeypair = StellarSdk.Keypair.fromSecret('YourFundingAccountSecret');
+            const sourceAccount = await server.loadAccount(sourceKeypair.publicKey());
+
+            const transaction = new StellarSdk.TransactionBuilder(sourceAccount, {
+                fee: StellarSdk.BASE_FEE,
+                networkPassphrase: StellarSdk.Networks.PUBLIC
+            })
+                .addOperation(StellarSdk.Operation.payment({
+                    destination: publicKey,
+                    asset: StellarSdk.Asset.native(),
+                    amount: amount.toString(),
+                }))
+                .addMemo(StellarSdk.Memo.text(memo))
+                .setTimeout(30)
+                .build();
+
+            transaction.sign(sourceKeypair);
+            await server.submitTransaction(transaction);
+        }
+    </script>
+    <script src="<https://cdn.jsdelivr.net/npm/stellar-sdk/dist/stellar-sdk.min.js>"></script>
+</body>
+</html>
